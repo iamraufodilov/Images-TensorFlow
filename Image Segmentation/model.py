@@ -97,4 +97,60 @@ down_stack = tf.keras.Model(inputs=base_model.input, outputs=base_model_outputs)
 
 down_stack.trainable = False
 
+# to decoder part
+up_stack = [
+    pix2pix.upsample(512, 3),  # 4x4 -> 8x8
+    pix2pix.upsample(256, 3),  # 8x8 -> 16x16
+    pix2pix.upsample(128, 3),  # 16x16 -> 32x32
+    pix2pix.upsample(64, 3),   # 32x32 -> 64x64
+]
+
+def unet_model(output_channels):
+  inputs = tf.keras.layers.Input(shape=[128, 128, 3])
+
+  # Downsampling through the model
+  skips = down_stack(inputs)
+  x = skips[-1]
+  skips = reversed(skips[:-1])
+
+  # Upsampling and establishing the skip connections
+  for up, skip in zip(up_stack, skips):
+    x = up(x)
+    concat = tf.keras.layers.Concatenate()
+    x = concat([x, skip])
+
+  # This is the last layer of the model
+  last = tf.keras.layers.Conv2DTranspose(
+      output_channels, 3, strides=2,
+      padding='same')  #64x64 -> 128x128
+
+  x = last(x)
+
+  return tf.keras.Model(inputs=inputs, outputs=x)
+
+model = unet_model(OUTPUT_CHANNELS)
+model.compile(optimizer='adam',
+              loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+              metrics=['accuracy'])
+
+# get the callbacks
+class DisplayCallback(tf.keras.callbacks.Callback):
+  def on_epoch_end(self, epoch, logs=None):
+    clear_output(wait=True)
+    show_predictions()
+    print ('\nSample Prediction after epoch {}\n'.format(epoch+1))
+
+
+# train the model
+EPOCHS = 20
+VAL_SUBSPLITS = 5
+VALIDATION_STEPS = info.splits['test'].num_examples//BATCH_SIZE//VAL_SUBSPLITS
+
+model_history = model.fit(train_dataset, epochs=EPOCHS,
+                          steps_per_epoch=STEPS_PER_EPOCH,
+                          validation_steps=VALIDATION_STEPS,
+                          validation_data=test_dataset,
+                          callbacks=[DisplayCallback()])
+
+
 #
